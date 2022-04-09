@@ -36,3 +36,6 @@
 *.db-wal
 *.ipch
 .vs/EventSystem/v17/.suo
+*.recipe
+*.log
+*.txt
