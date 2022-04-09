@@ -22,7 +22,7 @@ namespace sy::event_sys
 	public:
 		EventID Subscribe(Event e)
 		{
-			static std::atomic<EventID> id = INVALID_EVENT_ID;
+			static EventID id = INVALID_EVENT_ID;
 			lut[++id] = e;
 			return id;
 		}
