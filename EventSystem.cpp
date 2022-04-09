@@ -1,4 +1,4 @@
-﻿#include "EventSystem.h"
+﻿#include "event_sys.h"
 #include <iostream>
 
 sy::event_sys::EventSystem<int> intEventSys;
