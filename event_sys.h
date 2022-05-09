@@ -17,25 +17,72 @@ namespace sy::event_sys
 	class EventSystem
 	{
 	public:
-		using Event = std::function<void(EventParams...)>;
+		using Callable = std::function<void(EventParams...)>;
 
-	public:
-		EventID Subscribe(Event e)
+		class Event final
 		{
-			static EventID id = INVALID_EVENT_ID;
-			lut[++id] = e;
-			return id;
-		}
-
-		void Unsubscribe(EventID eventID)
-		{
-			if (eventID != INVALID_EVENT_ID)
+			friend EventSystem;
+		public:
+			Event() = default; // Null Event Object
+			Event(const Event&) = delete;
+			Event(Event&& rhs) noexcept :
+				bIsSubscribed(std::exchange(rhs.bIsSubscribed, false)),
+				id(std::exchange(rhs.id, INVALID_EVENT_ID)),
+				parentSystem(std::exchange(rhs.parentSystem, nullptr))
 			{
-				if (auto itr = lut.find(eventID); itr != lut.end())
+			}
+
+			~Event()
+			{
+				Unsubscribe();
+			}
+
+			Event& operator=(const Event&) = delete;
+			Event& operator=(Event&& rhs) noexcept
+			{
+				bIsSubscribed = std::exchange(rhs.bIsSubscribed, false);
+				id = std::exchange(rhs.id, INVALID_EVENT_ID);
+				parentSystem = std::exchange(rhs.parentSystem, nullptr);
+				return (*this);
+			}
+
+			void Unsubscribe()
+			{
+				if (parentSystem != nullptr)
 				{
-					lut.erase(itr);
+					bIsSubscribed = false;
+					parentSystem->Unsubscribe(id);
 				}
 			}
+
+			EventID ID() const { return id; }
+			bool IsAvailable() const { return parentSystem != nullptr && bIsSubscribed && parentSystem.Contains(id); }
+
+			EventSystem& ParentSystem() const { return parentSystem; }
+
+		private:
+			Event(EventID id, EventSystem* parentSystem) :
+				id(id),
+				parentSystem(parentSystem),
+				bIsSubscribed(true)
+			{
+			}
+
+		private:
+			bool bIsSubscribed = false;
+			EventID id = INVALID_EVENT_ID;
+			EventSystem* parentSystem = nullptr;
+
+		};
+
+	public:
+		/** Becareful with lambda which capture the (this) pointer in object. */
+		Event Subscribe(Callable e)
+		{
+			static EventID id = INVALID_EVENT_ID;
+			lut[++id] = std::move(e);
+
+			return Event{ id, this };
 		}
 
 		bool Contains(EventID eventID) const
@@ -51,8 +98,22 @@ namespace sy::event_sys
 			}
 		}
 
+		void Unsubscribe(EventID eventID)
+		{
+			if (eventID != INVALID_EVENT_ID)
+			{
+				if (auto itr = lut.find(eventID); itr != lut.end())
+				{
+					lut.erase(itr);
+				}
+			}
+		}
+
 	private:
-		std::unordered_map<EventID, Event> lut;
+		std::unordered_map<EventID, Callable> lut;
 
 	};
+
+	template <typename... EventParams>
+	using Event = EventSystem<EventParams...>::Event;
 }

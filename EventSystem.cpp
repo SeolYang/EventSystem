@@ -1,7 +1,8 @@
 ﻿#include "event_sys.h"
 #include <iostream>
+using namespace sy::event_sys;
 
-sy::event_sys::EventSystem<int> intEventSys;
+EventSystem<int> intEventSys;
 
 void Test(int val)
 {
@@ -13,40 +14,58 @@ class TestClass
 public:
 	TestClass()
 	{
-		eventID = intEventSys.Subscribe([this](int val) {
+		event = std::move(intEventSys.Subscribe([this](int val) {
 			this->SomeEvent(val);
-			});
+			}));
 	}
 
 	void UnsubEvent()
 	{
-		intEventSys.Unsubscribe(eventID);
+		event.Unsubscribe();
 	}
 
 	void SomeEvent(int val)
 	{
-		std::cout << "Test Class Some Event called : " << this << " ," << val << " , EventID : " << eventID << std::endl;
+		std::cout << "Called : Test Class Some Event called : " << this << "; " << val << "; EventID : " << event.ID() << std::endl;
 	}
 
 private:
-	sy::event_sys::EventID eventID = sy::event_sys::INVALID_EVENT_ID;
+	Event<int> event;
 
 };
 
 int main()
 {
+	std::cout << "* Print Event case 1" << std::endl;
+	std::vector<Event<int>> events;
+	events.emplace_back(intEventSys.Subscribe(&Test));
+	intEventSys.Notify(0);
+	std::cout << std::endl;
 
-	std::vector<sy::event_sys::EventID> eventIDs;
-	eventIDs.push_back(intEventSys.Subscribe(&Test));
+	{
+		auto scoped = intEventSys.Subscribe(&Test);
+		std::cout << "* Print Event case 2-1" << std::endl;
+		intEventSys.Notify(1);
+		std::cout << std::endl;
+	}
+	std::cout << "* Print Event case 2-2" << std::endl;
+	intEventSys.Notify(2);
+	std::cout << std::endl;
 
-	//{
-	//	auto scoped = intEventSys.SubscribeWithScope(&Test);
-	//	voidEventSys.Unsubscribe(std::move(scoped));
-	//	intEventSys.Notify(4);
-	//}
+	{
+		// std::vector<TestClass> objects; 
+		// << This case will make undefined behaviour cause of capture of this pointer.
 
-	std::vector<TestClass> objects{ TestClass(), TestClass() };
-	objects[0].UnsubEvent();
+		std::vector<std::unique_ptr<TestClass>> objects;
+		objects.emplace_back(std::make_unique<TestClass>());
+		objects.emplace_back(std::make_unique<TestClass>());
+
+		std::cout << "* Print Event case 3" << std::endl;
+		intEventSys.Notify(3);
+		std::cout << std::endl;
+	}
+
+	std::cout << "* Print Event case 4" << std::endl;
 	intEventSys.Notify(4);
 
 	return 0;
