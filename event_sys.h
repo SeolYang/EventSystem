@@ -4,20 +4,37 @@
 #include <memory>
 #include <atomic>
 #include <functional>
+#include <shared_mutex>
 
-namespace sy::event_sys
+namespace sy::utils
 {
-	template <typename... EventParams>
-	class EventSystem;
+	template <typename E>
+	constexpr auto ToUnderlyingType(E enumerator) noexcept
+	{
+		return static_cast<std::underlying_type_t<E>>(enumerator);
+	}
+}
 
-	using EventID = uint64_t;
-	constexpr EventID INVALID_EVENT_ID = 0;
+namespace sy
+{
+	using Mutex = std::shared_timed_mutex;
+	using ReadWriteLock = std::unique_lock<Mutex>;
+	using ReadOnlyLock = std::shared_lock<Mutex>;
+}
 
+namespace sy
+{
+	enum class EventID : uint64_t {};
+	constexpr EventID INVALID_EVENT_ID = static_cast<EventID>(0);
+
+	/**
+	* @brief	Thread-safe Callback Contrainer (Subscribed Callbacks itself is not a thread safe.)
+	*/
 	template <typename... EventParams>
-	class EventSystem
+	class EventSystem : public std::enable_shared_from_this<EventSystem<EventParams...>>
 	{
 	public:
-		using Callable = std::function<void(EventParams...)>;
+		using Callback = std::function<void(EventParams...)>;
 
 		class Event final
 		{
@@ -28,13 +45,16 @@ namespace sy::event_sys
 			Event(Event&& rhs) noexcept :
 				bIsSubscribed(std::exchange(rhs.bIsSubscribed, false)),
 				id(std::exchange(rhs.id, INVALID_EVENT_ID)),
-				parentSystem(std::exchange(rhs.parentSystem, nullptr))
+				parentSystem(rhs.parentSystem)
 			{
 			}
 
 			~Event()
 			{
-				Unsubscribe();
+				if (IsAvailable())
+				{
+					Unsubscribe();
+				}
 			}
 
 			Event& operator=(const Event&) = delete;
@@ -42,26 +62,25 @@ namespace sy::event_sys
 			{
 				bIsSubscribed = std::exchange(rhs.bIsSubscribed, false);
 				id = std::exchange(rhs.id, INVALID_EVENT_ID);
-				parentSystem = std::exchange(rhs.parentSystem, nullptr);
+				parentSystem = rhs.parentSystem;
 				return (*this);
 			}
 
 			void Unsubscribe()
 			{
-				if (parentSystem != nullptr)
+				if (IsAvailable())
 				{
 					bIsSubscribed = false;
-					parentSystem->Unsubscribe(id);
+					parentSystem.lock()->Unsubscribe(id);
 				}
 			}
 
-			EventID ID() const { return id; }
-			bool IsAvailable() const { return parentSystem != nullptr && bIsSubscribed && parentSystem.Contains(id); }
-
-			EventSystem& ParentSystem() const { return parentSystem; }
+			EventID ID() const noexcept { return id; }
+			bool IsAvailable() const noexcept { return !parentSystem.expired() && bIsSubscribed && parentSystem.lock()->Contains(id); }
+			std::weak_ptr<EventSystem> ParentSystem() const noexcept { return parentSystem; }
 
 		private:
-			Event(EventID id, EventSystem* parentSystem) :
+			Event(EventID id, std::weak_ptr<EventSystem> parentSystem) :
 				id(id),
 				parentSystem(parentSystem),
 				bIsSubscribed(true)
@@ -71,35 +90,54 @@ namespace sy::event_sys
 		private:
 			bool bIsSubscribed = false;
 			EventID id = INVALID_EVENT_ID;
-			EventSystem* parentSystem = nullptr;
+			std::weak_ptr<EventSystem> parentSystem;
 
 		};
 
 	public:
-		/** Becareful with lambda which capture the (this) pointer in object. */
-		Event Subscribe(Callable e)
-		{
-			static EventID id = INVALID_EVENT_ID;
-			lut[++id] = std::move(e);
+		EventSystem() noexcept = default;
 
-			return Event{ id, this };
+		EventSystem(const EventSystem&) = delete;
+		EventSystem(EventSystem&&) = delete;
+		EventSystem& operator=(const EventSystem&) = delete;
+		EventSystem& operator=(EventSystem&&) = delete;
+
+		static auto Create()
+		{
+			return std::make_shared<EventSystem>();
 		}
 
-		bool Contains(EventID eventID) const
+		/**
+		* @brief Becareful with lambda which captured the (this) pointer in object.
+		*/
+		Event Subscribe(Callback e)
 		{
+			ReadWriteLock lock{ mutex };
+			static auto id = utils::ToUnderlyingType(INVALID_EVENT_ID);
+			++id;
+			lut[static_cast<EventID>(id)] = std::move(e);
+
+			return Event{ static_cast<EventID>(id), this->shared_from_this() };
+		}
+
+		bool Contains(EventID eventID) const noexcept
+		{
+			ReadOnlyLock lock{ mutex };
 			return lut.find(eventID) != lut.end();
 		}
 
 		void Notify(EventParams&&... params)
 		{
-			for (auto callable : lut)
+			ReadOnlyLock lock{ mutex };
+			for (auto callback : lut)
 			{
-				callable.second(std::forward<EventParams>(params)...);
+				callback.second(std::forward<EventParams>(params)...);
 			}
 		}
 
 		void Unsubscribe(EventID eventID)
 		{
+			ReadWriteLock lock{ mutex };
 			if (eventID != INVALID_EVENT_ID)
 			{
 				if (auto itr = lut.find(eventID); itr != lut.end())
@@ -110,7 +148,8 @@ namespace sy::event_sys
 		}
 
 	private:
-		std::unordered_map<EventID, Callable> lut;
+		mutable Mutex mutex;
+		std::unordered_map<EventID, Callback> lut;
 
 	};
 

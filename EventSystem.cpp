@@ -1,8 +1,8 @@
 ﻿#include "event_sys.h"
 #include <iostream>
-using namespace sy::event_sys;
+using namespace sy;
 
-EventSystem<int> intEventSys;
+auto intEventSys = EventSystem<int>::Create();
 
 void Test(int val)
 {
@@ -14,7 +14,7 @@ class TestClass
 public:
 	TestClass()
 	{
-		event = std::move(intEventSys.Subscribe([this](int val) {
+		event = std::move(intEventSys->Subscribe([this](int val) {
 			this->SomeEvent(val);
 			}));
 	}
@@ -26,7 +26,7 @@ public:
 
 	void SomeEvent(int val)
 	{
-		std::cout << "Called : Test Class Some Event called : " << this << "; " << val << "; EventID : " << event.ID() << std::endl;
+		std::cout << "Called : Test Class Some Event called : " << this << "; " << val << "; EventID : " << static_cast<uint64_t>(event.ID()) << std::endl;
 	}
 
 private:
@@ -38,18 +38,18 @@ int main()
 {
 	std::cout << "* Print Event case 1" << std::endl;
 	std::vector<Event<int>> events;
-	events.emplace_back(intEventSys.Subscribe(&Test));
-	intEventSys.Notify(0);
+	events.emplace_back(intEventSys->Subscribe(&Test));
+	intEventSys->Notify(0);
 	std::cout << std::endl;
 
 	{
-		auto scoped = intEventSys.Subscribe(&Test);
+		auto scoped = intEventSys->Subscribe(&Test);
 		std::cout << "* Print Event case 2-1" << std::endl;
-		intEventSys.Notify(1);
+		intEventSys->Notify(1);
 		std::cout << std::endl;
 	}
 	std::cout << "* Print Event case 2-2" << std::endl;
-	intEventSys.Notify(2);
+	intEventSys->Notify(2);
 	std::cout << std::endl;
 
 	{
@@ -61,12 +61,12 @@ int main()
 		objects.emplace_back(std::make_unique<TestClass>());
 
 		std::cout << "* Print Event case 3" << std::endl;
-		intEventSys.Notify(3);
+		intEventSys->Notify(3);
 		std::cout << std::endl;
 	}
 
 	std::cout << "* Print Event case 4" << std::endl;
-	intEventSys.Notify(4);
+	intEventSys->Notify(4);
 
 	return 0;
 }
